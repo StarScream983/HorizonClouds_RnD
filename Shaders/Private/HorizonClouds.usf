@@ -1,0 +1,73 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/DoubleFloat.ush"
+
+float3 BoxPositionRelative;
+float3 BoxPositionRelativeHi;
+float3 BoxPositionRelativeLo;
+float3 CloudsVolume;
+uint bDebugSolid;
+
+// Builds the world-space view direction for this pixel — unit vector from the camera through the pixel.
+// Verified against OrbisClouds' own ReconstructWorldRayDirection (OrbisClouds.ush).
+float3 ReconstructWorldRayDirection(float2 ScreenPos)
+{
+	return normalize(mul(float3(ScreenPos, 1), DFToFloat3x3(PrimaryView.ScreenToWorld)).xyz);
+}
+
+// IQ box intersector (https://iquilezles.org/articles/intersectors/): axis-aligned box centered at the
+// origin with half-extents Extent, ray already in the box's local (center-relative) space.
+bool BoxIntersection(float3 RayOrigin, float3 RayDirection, float3 Extent, out float tNear, out float tFar)
+{
+	const float3 InvDir = 1.0 / RayDirection;
+	const float3 t0 = (-Extent - RayOrigin) * InvDir;
+	const float3 t1 = (Extent - RayOrigin) * InvDir;
+	const float3 tMin = min(t0, t1);
+	const float3 tMax = max(t0, t1);
+	tNear = max(max(tMin.x, tMin.y), tMin.z);
+	tFar = min(min(tMax.x, tMax.y), tMax.z);
+	if (tNear > tFar || tFar < 0.0)
+	{
+		return false;
+	}
+
+	// Camera inside the box: tNear is behind the camera (negative). Clamp so a future raymarch starts at
+	// the camera, not behind it — same fix as IntersectAtmosphereShell's max(TNear, 0.).
+	tNear = max(tNear, 0.0);
+	return true;
+}
+
+void MainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	if (bDebugSolid != 0u)
+	{
+		OutColor = float4(1.0, 0.0, 1.0, 1.0);
+		return;
+	}
+
+	const float2 ScreenPos = UVAndScreenPos.zw;
+	const float3 RayOrigin = float3(0.0, 0.0, 0.0);
+	const float3 RayDirection = ReconstructWorldRayDirection(ScreenPos);
+
+	// BoxPositionRelative is the volume's bottom-mid; its geometric center is offset up by half the
+	// height. Done in double-float since BoxPositionRelative can be arbitrarily large if the camera is
+	// far from world origin — this addition can't lose precision that way.
+	const FDFVector3 BoxPositionRelativeDF = MakeDFVector3(BoxPositionRelativeHi, BoxPositionRelativeLo);
+	const FDFVector3 BoxCenterRelativeDF = DFAdd(BoxPositionRelativeDF, float3(0.0, 0.0, CloudsVolume.z * 0.5));
+	const float3 BoxCenterRelative = DFDemote(BoxCenterRelativeDF);
+
+	const float3 Extent = CloudsVolume * 0.5;
+	const float3 LocalRayOrigin = RayOrigin - BoxCenterRelative;
+
+	float tNear = 0.0;
+	float tFar = 0.0;
+	if (!BoxIntersection(LocalRayOrigin, RayDirection, Extent, tNear, tFar))
+	{
+		OutColor = float4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+
+	OutColor = float4(1.0, 0.0, 1.0, 1.0);
+}

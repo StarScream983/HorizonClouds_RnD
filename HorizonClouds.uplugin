@@ -1,0 +1,27 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "HorizonClouds",
+	"Description": "Experimental study replica of a box-volume cloud raymarch technique, step by step: base setup, raymarching, stepping, density, lighting.",
+	"Category": "Rendering",
+	"CanContainContent": true,
+	"Modules": [
+		{
+			"Name": "HorizonCloudsCoreShaders",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit"
+		},
+		{
+			"Name": "HorizonClouds",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ImGui",
+			"Enabled": true
+		}
+	]
+}
