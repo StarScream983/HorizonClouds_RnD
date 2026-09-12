@@ -51,12 +51,9 @@ void MainPS(
 	const float3 RayOrigin = float3(0.0, 0.0, 0.0);
 	const float3 RayDirection = ReconstructWorldRayDirection(ScreenPos);
 
-	// BoxPositionRelative is the volume's bottom-mid; its geometric center is offset up by half the
-	// height. Done in double-float since BoxPositionRelative can be arbitrarily large if the camera is
-	// far from world origin — this addition can't lose precision that way.
+	// BoxPositionRelative is the volume's geometric center (component location = box center).
 	const FDFVector3 BoxPositionRelativeDF = MakeDFVector3(BoxPositionRelativeHi, BoxPositionRelativeLo);
-	const FDFVector3 BoxCenterRelativeDF = DFAdd(BoxPositionRelativeDF, float3(0.0, 0.0, CloudsVolume.z * 0.5));
-	const float3 BoxCenterRelative = DFDemote(BoxCenterRelativeDF);
+	const float3 BoxCenterRelative = DFDemote(BoxPositionRelativeDF);
 
 	const float3 Extent = CloudsVolume * 0.5;
 	const float3 LocalRayOrigin = RayOrigin - BoxCenterRelative;
@@ -69,5 +66,30 @@ void MainPS(
 		return;
 	}
 
-	OutColor = float4(1.0, 0.0, 1.0, 1.0);
+	// Step 1: actual raymarch accumulation, not an average. Density is a placeholder (normalized height,
+	// 0 at the box bottom, 1 at the top) until real noise sampling exists — but it's accumulated the way a
+	// real optical-depth integral is: Density * StepSize summed per step, not divided down to a mean. That's
+	// what makes this a raymarch instead of a per-pixel statistic.
+	const int StepCount = 32;
+	const float StepSize = (tFar - tNear) / StepCount;
+
+	// Fixed reference distance, independent of both the box size and this ray's own segment length — how
+	// far you have to travel through Density=1 material to reach full opacity. Neither CloudsVolume.z (ties
+	// opacity to the box's own size) nor (tFar-tNear) (cancels StepSize back to a constant 1/StepCount,
+	// undoing distance-weighting entirely) work for this; this has to be its own independent constant.
+	// Untested starting guess (2km) since I can't render this myself — retune if it saturates too fast/slow.
+	const float SigmaTDistance = 200000.0;
+
+	float AccumDensity = 0.0;
+	for (int Iteration = 0; Iteration < StepCount; Iteration++)
+	{
+		const float t = tNear + (Iteration)*StepSize;
+		const float3 SamplePosition = RayOrigin + RayDirection * t;
+
+		const float HeightFromBottom = (SamplePosition.z - BoxCenterRelative.z) + CloudsVolume.z * 0.5;
+		float Density = saturate(HeightFromBottom / CloudsVolume.z);
+		AccumDensity += Density * Density * (StepSize / SigmaTDistance);
+	}
+
+	OutColor = float4(saturate(AccumDensity).xxx, 1.0);
 }

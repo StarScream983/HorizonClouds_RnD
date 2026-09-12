@@ -5,8 +5,7 @@
 #include "Components/SceneComponent.h"
 #include "HorizonCloudsComponent.generated.h"
 
-// No mesh — the volume is pure raymarch data. Component location is the BOTTOM-MID of the volume
-// (centered in X/Y, base in Z; the volume extends from Z up to Z+CloudsVolume.z), not its center.
+// No mesh — the volume is pure raymarch data. Component location is the CENTER of the volume.
 UCLASS(ClassGroup = (HorizonClouds), meta = (BlueprintSpawnableComponent, DisplayName = "Horizon Clouds Component"))
 class HORIZONCLOUDS_API UHorizonCloudsComponent : public USceneComponent
 {
