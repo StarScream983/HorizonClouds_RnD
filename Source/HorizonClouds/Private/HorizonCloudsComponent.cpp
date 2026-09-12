@@ -12,6 +12,15 @@ FHorizonCloudsBoxRenderData UHorizonCloudsComponent::BuildBoxRenderData() const
 	FHorizonCloudsBoxRenderData Data;
 	Data.BoxPosition = GetComponentLocation();
 	Data.CloudsVolume = CloudsVolume;
+	if (WeatherTexture && WeatherTexture->GetResource())
+	{
+		Data.WeatherTextureRHI = WeatherTexture->GetResource()->TextureRHI;
+	}
+	if (WeatherTexture2 && WeatherTexture2->GetResource())
+	{
+		Data.WeatherTexture2RHI = WeatherTexture2->GetResource()->TextureRHI;
+	}
+	Data.WeatherTexTile = WeatherTexTile;
 	return Data;
 }
 

@@ -9,6 +9,7 @@
 #include "RHIStaticStates.h"
 #include "SceneView.h"
 #include "ScreenPass.h"
+#include "SystemTextures.h"
 
 static TAutoConsoleVariable<int32> CVarHorizonCloudsDebugSolid(
 	TEXT("r.HorizonClouds.DebugSolid"),
@@ -82,6 +83,21 @@ void FHorizonCloudsViewExtension::PrePostProcessPass_RenderThread(
 	PassParameters->BoxPositionRelativeHi = BoxPositionRelativeDF.High;
 	PassParameters->BoxPositionRelativeLo = BoxPositionRelativeDF.Low;
 	PassParameters->CloudsVolume = FVector3f(CachedBox.CloudsVolume);
+
+	PassParameters->bHasWeatherTexture = CachedBox.WeatherTextureRHI.IsValid() ? 1u : 0u;
+	PassParameters->WeatherTexture = CachedBox.WeatherTextureRHI.IsValid()
+										  ? RegisterExternalTexture(GraphBuilder, CachedBox.WeatherTextureRHI, TEXT("HorizonClouds.WeatherTexture"))
+										  : GSystemTextures.GetBlackDummy(GraphBuilder);
+	PassParameters->WeatherTextureSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+
+	PassParameters->bHasWeatherTexture2 = CachedBox.WeatherTexture2RHI.IsValid() ? 1u : 0u;
+	PassParameters->WeatherTexture2 = CachedBox.WeatherTexture2RHI.IsValid()
+										   ? RegisterExternalTexture(GraphBuilder, CachedBox.WeatherTexture2RHI, TEXT("HorizonClouds.WeatherTexture2"))
+										   : GSystemTextures.GetBlackDummy(GraphBuilder);
+	PassParameters->WeatherTexture2Sampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+
+	PassParameters->WeatherTexTile = CachedBox.WeatherTexTile;
+
 	PassParameters->bDebugSolid = bDebugSolid ? 1u : 0u;
 	PassParameters->View = View.ViewUniformBuffer;
 	PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();

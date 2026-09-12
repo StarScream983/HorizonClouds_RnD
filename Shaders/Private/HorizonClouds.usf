@@ -6,6 +6,18 @@ float3 BoxPositionRelative;
 float3 BoxPositionRelativeHi;
 float3 BoxPositionRelativeLo;
 float3 CloudsVolume;
+
+// Reference plugin's WeatherTex (T_WeatherMap/T_WeatherMap_2, copied from its own demo content) — flat 2D
+// coverage map, sampled by world XY (RayPos.xy / WeatherTexTile), not used yet — wired ahead of implementing
+// CustomExpression1's actual density formula.
+Texture2D WeatherTexture;
+SamplerState WeatherTextureSampler;
+uint bHasWeatherTexture;
+Texture2D WeatherTexture2;
+SamplerState WeatherTexture2Sampler;
+uint bHasWeatherTexture2;
+float WeatherTexTile;
+
 uint bDebugSolid;
 
 // Builds the world-space view direction for this pixel — unit vector from the camera through the pixel.
