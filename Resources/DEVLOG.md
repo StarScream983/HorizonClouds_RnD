@@ -105,3 +105,73 @@ float3 RayDir = RayDirection * BaseStepSize;
 `RayMaxSteps` now just caps total iterations — long horizon rays stop tracing early instead of aliasing (fine, since that region is a thin screen-space strip anyway). Our own addition, not from the reference. Generalizes directly to planet-scale spherical shells.
 
 ---
+
+## LIGHTING WALKTHROUGH, LINE BY LINE
+
+Walking through it block by block, in order:
+
+**Shadow march (lines 194–203)** — how much cloud is between this sample and the sun:
+```hlsl
+float DensityToSun = 0.0;
+float3 ShadowRayPos = RayPos;
+const float3 ShadowStep = normalize(LightDir) * (Extent.x / RayMaxSteps) * LightStepScale;
+for (int s = 0; s < ShadowMaxSteps; s++)
+{
+    ShadowRayPos += ShadowStep;
+    DensityToSun += SampleDensity(ShadowRayPos, floor(s/2), ...);
+}
+```
+From the current point, step 8 times *toward the sun* and sum the density along that mini-path. `DensityToSun` is the accumulated "optical thickness" between here and the light source — more cloud in the way = more sun blocked. Each step uses a coarser mip (`floor(s/2)`) since precision matters less farther into the shadow march.
+
+**Sun attenuation (207–210)** — turn that optical thickness into a 0–1 attenuation factor:
+```hlsl
+AttenPrim = exp(-BeerLawDensity * DensityToSun);
+```
+This is literally **Beer's Law**: light through a medium falls off exponentially with the amount of material in the way. `AttenPrim` is "how much direct sunlight reaches this point."
+```hlsl
+AttenSec = exp(-BeerLawDensity * AttenClampIntensity) * 0.7;
+SunAtten = Remap(DotLight, 0, 1, AttenSec, AttenSec*0.5);
+Atten = max(SunAtten, AttenPrim);
+```
+`AttenSec` is a *floor* value — light never goes fully to zero, there's always a small ambient contribution regardless of shadow depth (real clouds aren't pitch black inside). `SunAtten` interpolates that floor based on `DotLight` (angle between view and sun direction). `Atten` takes whichever is *brighter* of the two — the real Beer's-law falloff, or the ambient floor.
+
+**"Powder"/depth-based ambient occlusion (212–214)**:
+```hlsl
+Depth = CloudOutScatterAmbient * pow(DensitySample, Remap(HeightGradient, 0.3, 0.9, 0.5, 1.0));
+Vertical = pow(saturate(Remap(HeightGradient, 0, 0.3, 0.8, 1.0)), 0.8);
+AmbientOutScatter = 1.0 - saturate(Depth * Vertical);
+```
+This approximates multiple light scattering inside dense cloud without actually simulating it — the classic "powder sugar" trick. Thicker, lower-altitude cloud (`HeightGradient` near the base) darkens more (`AmbientOutScatter` shrinks toward 0); thin/high cloud stays brighter. It's a cheap fake for how light bounces around inside a dense medium rather than passing straight through.
+
+**Phase function — how light scatters relative to view angle (216–220)**, this is the **dual Henyey-Greenstein** part:
+```hlsl
+FirstHG  = InScatterIntensity * HG(InScatter, DotLight);
+SecondHG = SilverLightIntensity * pow(saturate(DotLight), SilverLightExp);
+InScatterHG = max(FirstHG, SecondHG);
+OutScatterHG = HG(OutScatter, DotLight);
+SunHighlight = lerp(InScatterHG, OutScatterHG, InOutScatterLerp);
+```
+`InScatter`/`OutScatter` model forward-scattering (looking toward the sun through cloud, get a bright glow — think looking at clouds near the sun) vs. back-scattering. `SecondHG` is the **silver lining** effect — a sharp bright rim exactly where you're looking almost straight at the sun through the cloud edge. `SunHighlight` blends both scattering directions into one value.
+
+**Putting it together, accumulating front-to-back (222–224)**:
+```hlsl
+Light = Atten * AmbientOutScatter * SunHighlight * LightIntensity * DensitySample * Transmittance;
+LightEnergy += Light;
+Transmittance *= (1.0 - DensitySample);
+```
+This step's contribution = (how much sun reaches here) × (ambient darkening) × (scattering brightness) × (density here) × (how much light has *already* been blocked by cloud in front of it — `Transmittance`). Classic front-to-back volume compositing: each new sample matters less as `Transmittance` shrinks, since earlier, closer cloud has already blocked most of the light.
+
+**After the loop — final grade (254–256)**:
+```hlsl
+LightEnergy = pow(max(lerp(ShadowColor, LightColor, LightEnergy), 0), LightPow);
+```
+`LightEnergy` (an unbounded accumulator, not a 0–1 color) is used as a **blend factor** between a dark `ShadowColor` and a bright `LightColor` — not added as raw light. Then `pow(..., LightPow)` is pure stylization (contrast/gamma push), not physically motivated.
+```hlsl
+AtmosphereBlendLerp = saturate(((dist_to_first_hit / AtmosphereBlendDistance) - 0.5) * AtmosphereBlendIntensity);
+LightEnergy = lerp(LightEnergy, AtmosphereFogColor, AtmosphereBlendLerp);
+```
+Fades distant cloud into an atmosphere/haze color — aerial perspective. `OutColor.a = 1 - Transmittance` is the final opacity.
+
+So the whole pipeline is: shadow-march → Beer's law attenuation with an ambient floor → powder-style depth darkening → dual-HG phase/silver-lining → front-to-back composite → stylized color grade → distance fog. All standard HZD-lineage cloud lighting, nothing exotic.
+
+---
