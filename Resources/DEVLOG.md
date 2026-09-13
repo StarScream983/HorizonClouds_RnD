@@ -31,10 +31,11 @@ The material graph after the raymarch does `Mask(A) → 1-x → Opacity`, i.e. t
 ## Wind speed exposed to ImGui
 
 Split into two separate tunables instead of one merged scalar, so the verified reference value stays distinguishable from the guessed one:
+
 - `r.HorizonClouds.WindSpeed` (default `12.0`) — the verified reference `WindSpeed` value.
 - `r.HorizonClouds.TimeScale` (default `0.001`) — unverified Time-to-UV conversion scalar (reference's exact `Time` semantics/`.cpp` Tick implementation were never read).
 
-Both are `SHADER_PARAMETER(float, ...)` on `FHorizonCloudsPS::FParameters`, with sliders in the "HORIZON CLOUDS" ImGui window (`HorizonCloudsCVars.h` holds the extern declarations so both `HorizonCloudsViewExtension.cpp` and `HorizonCloudsImGui.cpp` can reference them). Wind = `normalize(0.25, 0, -0.05) * WindSpeed * TimeScale * View.GameTime`. Wind *direction* stays hardcoded at the verified value — not exposed, since it isn't in question. Requires a C++ recompile.
+Both are `SHADER_PARAMETER(float, ...)` on `FHorizonCloudsPS::FParameters`, with sliders in the "HORIZON CLOUDS" ImGui window (`HorizonCloudsCVars.h` holds the extern declarations so both `HorizonCloudsViewExtension.cpp` and `HorizonCloudsImGui.cpp` can reference them). Wind = `normalize(0.25, 0, -0.05) * WindSpeed * TimeScale * View.GameTime`. Wind _direction_ stays hardcoded at the verified value — not exposed, since it isn't in question. Requires a C++ recompile.
 
 ## Still-unverified placeholders, unresolved
 
@@ -64,9 +65,9 @@ All three mechanisms (`StepDistanceScale`, `MipMapDistanceScale`, and our added 
 
 Sharing lineage but diverging significantly in execution. VC_Clouds is clearly built on the published HZD equations (Schneider's 2015 GDC talk) — the density formula shape (Perlin-Worley base shape + Worley erosion, height-gradient/cloud-type shaping, dual Henyey-Greenstein phase, Beer's law, in/out-scattering, ambient-occlusion-ish terms) is the same lineage we've verified in `SampleDensity`. But the actual production techniques diverge in several concrete ways:
 
-- **Stepping — the biggest difference.** HZD's actual technique is genuine coarse→fine adaptive marching: take large, cheap steps sampling *only* the low-frequency base shape (no erosion) until density is first detected, then switch to small, fine steps and start sampling full detail for accurate lighting. VC_Clouds does **not** do this — we traced it exactly: it's a fixed per-ray step size (chosen once) that only toggles between 1x (in cloud) and 2x (in empty space), never refining below the base step, and it samples the *same* density function (full formula) regardless of whether it's "searching" or "inside." The LOD reduction in VC_Clouds is tied purely to camera distance (`floor(dist/MipMapScaleDistance)`), not to the coarse/fine search state like HZD's — exactly why we get the 3-zone distance banding: HZD's LOD is content-adaptive, VC_Clouds' is just distance-adaptive.
+- **Stepping — the biggest difference.** HZD's actual technique is genuine coarse→fine adaptive marching: take large, cheap steps sampling _only_ the low-frequency base shape (no erosion) until density is first detected, then switch to small, fine steps and start sampling full detail for accurate lighting. VC*Clouds does **not** do this — we traced it exactly: it's a fixed per-ray step size (chosen once) that only toggles between 1x (in cloud) and 2x (in empty space), never refining below the base step, and it samples the \_same* density function (full formula) regardless of whether it's "searching" or "inside." The LOD reduction in VC_Clouds is tied purely to camera distance (`floor(dist/MipMapScaleDistance)`), not to the coarse/fine search state like HZD's — exactly why we get the 3-zone distance banding: HZD's LOD is content-adaptive, VC_Clouds' is just distance-adaptive.
 - **Weather generation.** HZD simulates an evolving weather map procedurally across an open world (wind-driven, gameplay-relevant). VC_Clouds uses one static painted 2D texture (`T_WeatherMap`), UV-tiled across a fixed box — no simulation.
-- **Performance architecture.** HZD renders at reduced/checkerboard resolution with temporal reprojection to hit frame budget at open-world scale. VC_Clouds renders full-resolution every frame with a hard step cap and no temporal accumulation at all — its own actor description literally admits *"major optimisation issues."* This absence of temporal amortization is why it leans so hard on the distance-based step/LOD hacks to survive at range.
+- **Performance architecture.** HZD renders at reduced/checkerboard resolution with temporal reprojection to hit frame budget at open-world scale. VC*Clouds renders full-resolution every frame with a hard step cap and no temporal accumulation at all — its own actor description literally admits *"major optimisation issues."\_ This absence of temporal amortization is why it leans so hard on the distance-based step/LOD hacks to survive at range.
 - **Wind/motion.** HZD uses curl-noise-driven distortion for wisping/turbulence. VC_Clouds' wind is a plain linear UV offset (`Position/Tile + Wind`) — no curl noise texture exists anywhere in its parameter list. (Notably, `OrbisClouds` already has a `CurlNoiseFBM` texture staged on disk, so that's a real point of divergence to keep in mind for the planet-scale project.)
 - **Scope/scale.** HZD is an unbounded atmospheric layer wrapping the whole game world/horizon. VC_Clouds is a bounded local AABB "prop" (hence needing a hard box intersection and `ActorMin`/`ActorMax` clamps at all) — architecturally it's a local volumetric object, not a planet-scale system.
 
@@ -76,8 +77,31 @@ Sharing lineage but diverging significantly in execution. VC_Clouds is clearly b
 
 ## ISOVOLUME IN THE DISTANCE
 
-**The grey flatten-out** is fully by design, conceptually — this is `AtmosphereBlendDistance` (verified at 5km/500,000 units) doing exactly what it's meant to: fading the cloud into an "atmospheric fog" color as distance increases, so far clouds don't render with full sharp contrast forever (real aerial perspective does this too). The math saturates to 100% fog color once you're roughly 7.5km from the point where the ray first entered the cloud — past that, the output is *entirely* the fog color, no lighting contribution survives at all. The reason it looks like a flat, dead grey rather than a natural haze is that our `AtmosphereFogColor` is still the hardcoded placeholder we flagged earlier — the real reference samples the actual scene/sky color there instead of a fixed constant, so a real implementation would fade into whatever's actually behind it rather than snapping to one flat tone. This is squarely the still-unimplemented item from the DEVLOG.
+**The grey flatten-out** is fully by design, conceptually — this is `AtmosphereBlendDistance` (verified at 5km/500,000 units) doing exactly what it's meant to: fading the cloud into an "atmospheric fog" color as distance increases, so far clouds don't render with full sharp contrast forever (real aerial perspective does this too). The math saturates to 100% fog color once you're roughly 7.5km from the point where the ray first entered the cloud — past that, the output is _entirely_ the fog color, no lighting contribution survives at all. The reason it looks like a flat, dead grey rather than a natural haze is that our `AtmosphereFogColor` is still the hardcoded placeholder we flagged earlier — the real reference samples the actual scene/sky color there instead of a fixed constant, so a real implementation would fade into whatever's actually behind it rather than snapping to one flat tone. This is squarely the still-unimplemented item from the DEVLOG.
 
 **The iso-volume look** (before the grey kicks in) comes from the same two mechanisms behind the earlier three-zone banding: past `StepScaleDistance` (2km) the primary ray's step size balloons up to 11x, and past `MipMapScaleDistance` (5km) the noise texture degrades toward a flat blurred mip. With both coarsened, there just isn't enough sampling resolution left to resolve local density/lighting variation — so most of what you see is dominated by whatever shading got computed at the very first few (very large) steps into the cloud, which is fairly uniform across a wide swath of screen at that distance. That reads as a flat-shaded blob rather than something with internal light scattering, because internal light scattering literally isn't being sampled anymore at that point.
 
 **So: yes, controllable.** The two levers are `StepScaleDistance`/`MipMapScaleDistance` (push these farther out to keep real shading detail alive longer before it degrades) and implementing the real scene-sampled `AtmosphereFogColor` (so the far fade looks like haze instead of a flat wall of grey). Neither requires touching the core density/lighting math — both are the same distance-threshold knobs already in the shader.
+
+---
+
+## HORIZON BAND ARTIFACT — RESOLVED
+
+Bug: standing inside the cloud, looking dead-level, showed a thin horizontal band.
+
+Ruled out (via debug-mode visualizations): constant `HeightGradient` on level rays, `Transmittance` not saturating, `AtmosphereFogColor`/fog blend, step-length-weighted `Transmittance` compensation.
+
+Root cause: box is thin in Z, wide in XY, so a level ray's `tFar` spikes far higher than a pitched ray's. That inflates the per-step distance right at the horizon past the noise tile's feature size — spatial aliasing, not an integration bug.
+
+Fix: decouple step size from `RayMaxSteps`. Use a fixed physical step size, let step _count_ vary instead:
+
+```hlsl
+const float FixedStepSize = 4000000.0 / 512.0;
+const float RayLength = tFar - tNear;
+const float BaseStepSize = (RayLength >= FixedStepSize * 2.0) ? FixedStepSize : ((RayLength / 10.0));
+float3 RayDir = RayDirection * BaseStepSize;
+```
+
+`RayMaxSteps` now just caps total iterations — long horizon rays stop tracing early instead of aliasing (fine, since that region is a thin screen-space strip anyway). Our own addition, not from the reference. Generalizes directly to planet-scale spherical shells.
+
+---

@@ -154,7 +154,11 @@ void MainPS(
 	const float3 ActorMax = Extent;
 
 	float3 RayPos = LocalRayOrigin + RayDirection * tNear;
-	float3 RayDir = RayDirection * ((tFar - tNear) / RayMaxSteps);
+
+	const float FixedStepSize = 4000000.0 / 512.0;
+	const float RayLength = tFar - tNear;
+	const float BaseStepSize = (RayLength >= FixedStepSize * 2.0) ? FixedStepSize : ((RayLength / 10.0));
+	float3 RayDir = RayDirection * BaseStepSize;
 
 	const int3 JitterRandPos = int3(SvPosition.xy, View.StateFrameIndexMod8);
 	const float Jitter = float(Rand3DPCG16(JitterRandPos).x) / 65536.0;
