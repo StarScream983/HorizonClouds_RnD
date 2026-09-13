@@ -2,15 +2,15 @@ float ResultNoise = 0;
 
 float HeightGradient = (RayPos.z - ActorMin.z) / (ActorMax.z - ActorMin.z);
 
-//Base Noise
+// Base Noise
 float3 BaseNoiseUVW = (frac(RayPos / BaseNoiseTexTile + Wind));
 float4 BaseNoise = BaseNoiseTex.SampleLevel(BaseNoiseTexSampler, BaseNoiseUVW, LOD);
 
-//Small Noise
+// Small Noise
 float3 SmallNoiseUVW = (frac(RayPos / SmallNoiseTexTile + Wind \* 10));
 float4 SmallNoise = SmallNoiseTex.SampleLevel(SmallNoiseTexSampler, SmallNoiseUVW, LOD);
 
-//Coverage texture
+// Coverage texture
 float4 WeatherMap = WeatherTex.SampleLevel(WeatherTexSampler, RayPos.xy / WeatherTexTile + Wind.xy \* 0.15, 0);
 
 WeatherMap.b = saturate(WeatherMap.b + ((WeatherParam.r - 0.5) \* 2));

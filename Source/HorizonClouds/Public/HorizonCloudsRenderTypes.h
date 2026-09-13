@@ -11,6 +11,6 @@ struct FHorizonCloudsBoxRenderData
 	FVector CloudsVolume = FVector(4000000.0, 4000000.0, 200000.0);
 
 	FTextureRHIRef WeatherTextureRHI;
-	FTextureRHIRef WeatherTexture2RHI;
-	float WeatherTexTile = 4000000.0f;
+	FTextureRHIRef BaseNoiseTextureRHI;
+	FTextureRHIRef SmallNoiseTextureRHI;
 };

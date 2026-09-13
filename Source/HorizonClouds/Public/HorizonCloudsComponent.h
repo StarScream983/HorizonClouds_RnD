@@ -4,6 +4,7 @@
 #include "HorizonCloudsRenderTypes.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Texture2D.h"
+#include "Engine/VolumeTexture.h"
 #include "HorizonCloudsComponent.generated.h"
 
 // No mesh — the volume is pure raymarch data. Component location is the CENTER of the volume.
@@ -24,12 +25,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HorizonClouds|Weather")
 	TObjectPtr<UTexture2D> WeatherTexture = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HorizonClouds|Weather")
-	TObjectPtr<UTexture2D> WeatherTexture2 = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HorizonClouds|Noise")
+	TObjectPtr<UVolumeTexture> BaseNoiseTexture = nullptr;
 
-	// UU that one full tile of WeatherTexture covers in world XY — matches the reference's WeatherTexTile.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HorizonClouds|Weather", meta = (ClampMin = "1.0"))
-	float WeatherTexTile = 4000000.0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HorizonClouds|Noise")
+	TObjectPtr<UVolumeTexture> SmallNoiseTexture = nullptr;
 
 	FHorizonCloudsBoxRenderData BuildBoxRenderData() const;
 	void NotifyChanged();

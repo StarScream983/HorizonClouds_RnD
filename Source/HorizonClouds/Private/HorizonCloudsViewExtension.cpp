@@ -90,20 +90,24 @@ void FHorizonCloudsViewExtension::PrePostProcessPass_RenderThread(
 										  : GSystemTextures.GetBlackDummy(GraphBuilder);
 	PassParameters->WeatherTextureSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
 
-	PassParameters->bHasWeatherTexture2 = CachedBox.WeatherTexture2RHI.IsValid() ? 1u : 0u;
-	PassParameters->WeatherTexture2 = CachedBox.WeatherTexture2RHI.IsValid()
-										   ? RegisterExternalTexture(GraphBuilder, CachedBox.WeatherTexture2RHI, TEXT("HorizonClouds.WeatherTexture2"))
-										   : GSystemTextures.GetBlackDummy(GraphBuilder);
-	PassParameters->WeatherTexture2Sampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+	PassParameters->bHasBaseNoiseTexture = CachedBox.BaseNoiseTextureRHI.IsValid() ? 1u : 0u;
+	PassParameters->BaseNoiseTexture = CachedBox.BaseNoiseTextureRHI.IsValid()
+											? RegisterExternalTexture(GraphBuilder, CachedBox.BaseNoiseTextureRHI, TEXT("HorizonClouds.BaseNoiseTexture"))
+											: GSystemTextures.GetVolumetricBlackDummy(GraphBuilder);
+	PassParameters->BaseNoiseTextureSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
 
-	PassParameters->WeatherTexTile = CachedBox.WeatherTexTile;
+	PassParameters->bHasSmallNoiseTexture = CachedBox.SmallNoiseTextureRHI.IsValid() ? 1u : 0u;
+	PassParameters->SmallNoiseTexture = CachedBox.SmallNoiseTextureRHI.IsValid()
+											 ? RegisterExternalTexture(GraphBuilder, CachedBox.SmallNoiseTextureRHI, TEXT("HorizonClouds.SmallNoiseTexture"))
+											 : GSystemTextures.GetVolumetricBlackDummy(GraphBuilder);
+	PassParameters->SmallNoiseTextureSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
 
 	PassParameters->bDebugSolid = bDebugSolid ? 1u : 0u;
 	PassParameters->View = View.ViewUniformBuffer;
 	PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 
 	TShaderMapRef<FScreenPassVS> VertexShader(GlobalShaderMap);
-	FRHIBlendState *BlendState = FScreenPassPipelineState::FDefaultBlendState::GetRHI();
+	FRHIBlendState *BlendState = TStaticBlendState<CW_RGBA, BO_Add, BF_SourceAlpha, BF_InverseSourceAlpha, BO_Add, BF_Zero, BF_One>::GetRHI();
 	FRHIDepthStencilState *DepthStencilState = FScreenPassPipelineState::FDefaultDepthStencilState::GetRHI();
 
 	AddDrawScreenPass(

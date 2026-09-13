@@ -16,11 +16,14 @@ FHorizonCloudsBoxRenderData UHorizonCloudsComponent::BuildBoxRenderData() const
 	{
 		Data.WeatherTextureRHI = WeatherTexture->GetResource()->TextureRHI;
 	}
-	if (WeatherTexture2 && WeatherTexture2->GetResource())
+if (BaseNoiseTexture && BaseNoiseTexture->GetResource())
 	{
-		Data.WeatherTexture2RHI = WeatherTexture2->GetResource()->TextureRHI;
+		Data.BaseNoiseTextureRHI = BaseNoiseTexture->GetResource()->TextureRHI;
 	}
-	Data.WeatherTexTile = WeatherTexTile;
+	if (SmallNoiseTexture && SmallNoiseTexture->GetResource())
+	{
+		Data.SmallNoiseTextureRHI = SmallNoiseTexture->GetResource()->TextureRHI;
+	}
 	return Data;
 }
 

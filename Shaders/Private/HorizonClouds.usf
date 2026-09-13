@@ -1,6 +1,7 @@
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
 #include "/Engine/Private/DoubleFloat.ush"
+#include "/Engine/Private/RandomPCG.ush"
 
 float3 BoxPositionRelative;
 float3 BoxPositionRelativeHi;
@@ -13,10 +14,12 @@ float3 CloudsVolume;
 Texture2D WeatherTexture;
 SamplerState WeatherTextureSampler;
 uint bHasWeatherTexture;
-Texture2D WeatherTexture2;
-SamplerState WeatherTexture2Sampler;
-uint bHasWeatherTexture2;
-float WeatherTexTile;
+Texture3D BaseNoiseTexture;
+SamplerState BaseNoiseTextureSampler;
+uint bHasBaseNoiseTexture;
+Texture3D SmallNoiseTexture;
+SamplerState SmallNoiseTextureSampler;
+uint bHasSmallNoiseTexture;
 
 uint bDebugSolid;
 
@@ -29,6 +32,44 @@ float3 ReconstructWorldRayDirection(float2 ScreenPos)
 
 // IQ box intersector (https://iquilezles.org/articles/intersectors/): axis-aligned box centered at the
 // origin with half-extents Extent, ray already in the box's local (center-relative) space.
+float Remap(float V, float L0, float H0, float Ln, float Hn)
+{
+	return Ln + (V - L0) * (Hn - Ln) / (H0 - L0);
+}
+
+// Density Function
+float SampleDensity(float3 Position, float LOD, float3 Wind, float3 ActorMin, float3 ActorMax)
+{
+	const float HeightGradient = (Position.z - ActorMin.z) / (ActorMax.z - ActorMin.z);
+
+	const float BaseNoiseTexTile = CloudsVolume.x / 20.0;
+	const float SmallNoiseTexTile = CloudsVolume.x / 230.0;
+	const float WeatherTexTile = CloudsVolume.x / 1.5;
+
+	const float3 BaseNoiseUVW = frac(Position / BaseNoiseTexTile + Wind);
+	const float4 BaseNoise = bHasBaseNoiseTexture != 0u ? Texture3DSampleLevel(BaseNoiseTexture, BaseNoiseTextureSampler, BaseNoiseUVW, LOD) : float4(0.0, 0.0, 0.0, 0.0);
+
+	const float3 SmallNoiseUVW = frac(Position / SmallNoiseTexTile + Wind * 10.0);
+	const float4 SmallNoise = bHasSmallNoiseTexture != 0u ? Texture3DSampleLevel(SmallNoiseTexture, SmallNoiseTextureSampler, SmallNoiseUVW, LOD) : float4(0.0, 0.0, 0.0, 0.0);
+
+	float4 WeatherMap = bHasWeatherTexture != 0u ? Texture2DSampleLevel(WeatherTexture, WeatherTextureSampler, Position.xy / WeatherTexTile + Wind.xy * 0.15, 0) : float4(0.0, 0.0, 0.0, 0.0);
+
+	const float2 WeatherParam = float2(0.65, 14.0);
+
+	WeatherMap.b = saturate(WeatherMap.b + ((WeatherParam.x - 0.5) * 2.0));
+	const float WeatherState = max(WeatherMap.r, saturate(WeatherParam.x - 0.5) * 2.0 * WeatherMap.g);
+
+	const float ShapeAltering = saturate(Remap(HeightGradient, 0.0, 0.07, 0.0, 1.0)) * saturate(Remap(HeightGradient, WeatherMap.b * 0.2, WeatherMap.b, 1.0, 0.0));
+	const float DensityAltering = WeatherParam.y * HeightGradient * saturate(Remap(HeightGradient, 0.0, 0.15, 0.0, 1.0)) * saturate(Remap(HeightGradient, 0.9, 1.0, 1.0, 0.0)) * WeatherMap.a * 2.0;
+
+	const float BaseNoiseSample = Remap(BaseNoise.r, (BaseNoise.g * 0.625 + BaseNoise.b * 0.25 + BaseNoise.a * 0.125) - 1.0, 1.0, 0.0, 1.0);
+	const float SmallNoiseSample = SmallNoise.r * 0.625 + SmallNoise.g * 0.25 + SmallNoise.b * 0.125;
+	const float DetailNoise = 0.35 * exp(-WeatherParam.x * 0.75) * lerp(SmallNoiseSample, 1.0 - SmallNoiseSample, saturate(HeightGradient * 10.0));
+
+	const float ShapeNoise = saturate(Remap(BaseNoiseSample * ShapeAltering, 1.0 - WeatherParam.x * WeatherState, 1.0, 0.0, 1.0));
+	return saturate(Remap(ShapeNoise, DetailNoise, 1.0, 0.0, 1.0)) * DensityAltering;
+}
+
 bool BoxIntersection(float3 RayOrigin, float3 RayDirection, float3 Extent, out float tNear, out float tFar)
 {
 	const float3 InvDir = 1.0 / RayDirection;
@@ -51,6 +92,7 @@ bool BoxIntersection(float3 RayOrigin, float3 RayDirection, float3 Extent, out f
 
 void MainPS(
 	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	in float4 SvPosition : SV_Position,
 	out float4 OutColor : SV_Target0)
 {
 	if (bDebugSolid != 0u)
@@ -74,34 +116,138 @@ void MainPS(
 	float tFar = 0.0;
 	if (!BoxIntersection(LocalRayOrigin, RayDirection, Extent, tNear, tFar))
 	{
-		OutColor = float4(0.0, 0.0, 0.0, 1.0);
+		OutColor = float4(0.0, 0.0, 0.0, 0.0);
 		return;
 	}
 
-	// Step 1: actual raymarch accumulation, not an average. Density is a placeholder (normalized height,
-	// 0 at the box bottom, 1 at the top) until real noise sampling exists — but it's accumulated the way a
-	// real optical-depth integral is: Density * StepSize summed per step, not divided down to a mean. That's
-	// what makes this a raymarch instead of a per-pixel statistic.
-	const int StepCount = 32;
-	const float StepSize = (tFar - tNear) / StepCount;
+	const int RayMaxSteps = 1500;
+	const int ShadowMaxSteps = 8;
+	const float StepScaleDistance = 200000.0;
+	const float MipMapScaleDistance = 500000.0;
+	const float LightStepScale = 2.0;
 
-	// Fixed reference distance, independent of both the box size and this ray's own segment length — how
-	// far you have to travel through Density=1 material to reach full opacity. Neither CloudsVolume.z (ties
-	// opacity to the box's own size) nor (tFar-tNear) (cancels StepSize back to a constant 1/StepCount,
-	// undoing distance-weighting entirely) work for this; this has to be its own independent constant.
-	// Untested starting guess (2km) since I can't render this myself — retune if it saturates too fast/slow.
-	const float SigmaTDistance = 200000.0;
+	const float BeerLawDensity = 0.85;
+	const float AttenClampIntensity = 0.6;
+	const float CloudOutScatterAmbient = 1.0;
+	const float InScatter = 0.75;
+	const float InScatterIntensity = 0.05;
+	const float SilverLightExp = 1.0;
+	const float SilverLightIntensity = 0.5;
+	const float OutScatter = -0.045;
+	const float InOutScatterLerp = 0.5;
+	const float LightColorIntensity = 1.25;
+	const float LightIntensity = 4.0;
+	const float LightPow = 3.0;
+	const float3 LightColor = float3(1.14, 1.22, 1.31) * LightColorIntensity;
+	const float3 ShadowColor = float3(0.60, 0.63, 0.7);
 
-	float AccumDensity = 0.0;
-	for (int Iteration = 0; Iteration < StepCount; Iteration++)
+	const float AtmosphereBlendDistance = 500000.0;
+	const float AtmosphereBlendIntensity = 1.0;
+	const float3 AtmosphereFogColor = float3(0.5, 0.6, 0.7);
+
+	const float3 LightDir = float3(0.492453, -0.086837, 0.865996);
+	const float3 Wind = float3(0.0, 0.0, 0.0);
+
+	const float3 ActorMin = -Extent;
+	const float3 ActorMax = Extent;
+
+	float3 RayPos = LocalRayOrigin + RayDirection * tNear;
+	float3 RayDir = RayDirection * ((tFar - tNear) / RayMaxSteps);
+
+	const int3 JitterRandPos = int3(SvPosition.xy, View.StateFrameIndexMod8);
+	const float Jitter = float(Rand3DPCG16(JitterRandPos).x) / 65536.0;
+	RayPos += Jitter * RayDir;
+
+	float StepDistanceScale = clamp((length((RayPos - LocalRayOrigin).xy) - StepScaleDistance) / StepScaleDistance, 0.0, 10.0);
+	RayDir += RayDir * StepDistanceScale;
+
+	const float DotLight = dot(normalize(RayDir), normalize(LightDir));
+
+	float Transmittance = 1.0;
+	float3 LightEnergy = 0.0;
+	bool bZeroSample = false;
+	float4 AtmospherePos = 0.0;
+
+	for (int r = 0; r < RayMaxSteps; r++)
 	{
-		const float t = tNear + (Iteration)*StepSize;
-		const float3 SamplePosition = RayOrigin + RayDirection * t;
+		float MipMapDistanceScale = min(floor(length((RayPos - LocalRayOrigin).xy) / MipMapScaleDistance), 5.0);
 
-		const float HeightFromBottom = (SamplePosition.z - BoxCenterRelative.z) + CloudsVolume.z * 0.5;
-		float Density = saturate(HeightFromBottom / CloudsVolume.z);
-		AccumDensity += Density * Density * (StepSize / SigmaTDistance);
+		float DensitySample = SampleDensity(RayPos, MipMapDistanceScale, Wind, ActorMin, ActorMax);
+
+		if (DensitySample > 0.01)
+		{
+			if (bZeroSample)
+			{
+				bZeroSample = false;
+				RayPos -= RayDir;
+
+				MipMapDistanceScale = min(floor(length((RayPos - LocalRayOrigin).xy) / MipMapScaleDistance), 5.0);
+				DensitySample = SampleDensity(RayPos, MipMapDistanceScale, Wind, ActorMin, ActorMax);
+			}
+
+			float DensityToSun = 0.0;
+			float3 ShadowRayPos = RayPos;
+			const float3 ShadowStep = normalize(LightDir) * (Extent.x / (float)RayMaxSteps) * LightStepScale;
+			for (int s = 0; s < ShadowMaxSteps; s++)
+			{
+				ShadowRayPos += ShadowStep;
+
+				const float MipMapShadowScale = floor(s / 2);
+				DensityToSun += SampleDensity(ShadowRayPos, MipMapShadowScale, Wind, ActorMin, ActorMax);
+			}
+
+			const float HeightGradient = (RayPos.z - ActorMin.z) / (ActorMax.z - ActorMin.z);
+
+			const float AttenPrim = exp(-BeerLawDensity * DensityToSun);
+			const float AttenSec = exp(-BeerLawDensity * AttenClampIntensity) * 0.7;
+			const float SunAtten = Remap(DotLight, 0.0, 1.0, AttenSec, AttenSec * 0.5);
+			const float Atten = max(SunAtten, AttenPrim);
+
+			const float Depth = CloudOutScatterAmbient * pow(DensitySample, Remap(HeightGradient, 0.3, 0.9, 0.5, 1.0));
+			const float Vertical = pow(saturate(Remap(HeightGradient, 0.0, 0.3, 0.8, 1.0)), 0.8);
+			const float AmbientOutScatter = 1.0 - saturate(Depth * Vertical);
+
+			const float FirstHG = InScatterIntensity * ((1.0 - InScatter * InScatter) / pow(1.0 + InScatter * InScatter - 2.0 * InScatter * DotLight, 1.5)) / 4.0 * 3.1415;
+			const float SecondHG = SilverLightIntensity * pow(saturate(DotLight), SilverLightExp);
+			const float InScatterHG = max(FirstHG, SecondHG);
+			const float OutScatterHG = ((1.0 - OutScatter * OutScatter) / pow(1.0 + OutScatter * OutScatter - 2.0 * OutScatter * DotLight, 1.5)) / 4.0 * 3.1415;
+			const float SunHighlight = lerp(InScatterHG, OutScatterHG, InOutScatterLerp);
+
+			const float3 Light = Atten * AmbientOutScatter * SunHighlight * LightIntensity * DensitySample * Transmittance;
+			LightEnergy += Light;
+			Transmittance *= (1.0 - DensitySample);
+		}
+
+		if (AtmospherePos.w == 0.0)
+		{
+			AtmospherePos.xyz = RayPos.xyz;
+			AtmospherePos.w = 1.0;
+		}
+
+		if (DensitySample > 0.0)
+		{
+			RayPos += RayDir;
+		}
+		else
+		{
+			RayPos += RayDir * 2.0;
+			bZeroSample = true;
+		}
+
+		if (RayPos.x > ActorMax.x || RayPos.x < ActorMin.x || RayPos.y > ActorMax.y || RayPos.y < ActorMin.y || RayPos.z > ActorMax.z || RayPos.z < ActorMin.z)
+		{
+			break;
+		}
+
+		if (Transmittance <= 0.0)
+		{
+			break;
+		}
 	}
 
-	OutColor = float4(saturate(AccumDensity).xxx, 1.0);
+	LightEnergy = pow(max(lerp(ShadowColor, LightColor, LightEnergy), 0.0), LightPow);
+	const float AtmosphereBlendLerp = saturate(((length((AtmospherePos.xyz - LocalRayOrigin).xy) / AtmosphereBlendDistance) - 0.5) * AtmosphereBlendIntensity);
+	LightEnergy = lerp(LightEnergy, AtmosphereFogColor, AtmosphereBlendLerp);
+
+	OutColor = float4(LightEnergy, 1.0 - Transmittance);
 }
