@@ -1,5 +1,6 @@
 #include "HorizonCloudsViewExtension.h"
 
+#include "HorizonCloudsCVars.h"
 #include "HorizonCloudsShader.h"
 #include "HorizonCloudsSubsystem.h"
 #include "FXRenderingUtils.h"
@@ -15,6 +16,18 @@ static TAutoConsoleVariable<int32> CVarHorizonCloudsDebugSolid(
 	TEXT("r.HorizonClouds.DebugSolid"),
 	0,
 	TEXT("1 = force fullscreen magenta regardless of the box intersection test. 0 = actual ray-box test."),
+	ECVF_RenderThreadSafe);
+
+TAutoConsoleVariable<float> CVarHorizonCloudsWindSpeed(
+	TEXT("r.HorizonClouds.WindSpeed"),
+	12.0f,
+	TEXT("Wind speed — verified reference value (WindSpeed=12 from VC_Clouds)."),
+	ECVF_RenderThreadSafe);
+
+TAutoConsoleVariable<float> CVarHorizonCloudsTimeScale(
+	TEXT("r.HorizonClouds.TimeScale"),
+	0.001f,
+	TEXT("Time-to-UV conversion scalar applied on top of WindSpeed. Unverified — reference's exact Time semantics are unknown."),
 	ECVF_RenderThreadSafe);
 
 FHorizonCloudsViewExtension::FHorizonCloudsViewExtension(const FAutoRegister &AutoRegister, UWorld *InWorld)
@@ -103,6 +116,8 @@ void FHorizonCloudsViewExtension::PrePostProcessPass_RenderThread(
 	PassParameters->SmallNoiseTextureSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
 
 	PassParameters->bDebugSolid = bDebugSolid ? 1u : 0u;
+	PassParameters->WindSpeed = CVarHorizonCloudsWindSpeed.GetValueOnRenderThread();
+	PassParameters->TimeScale = CVarHorizonCloudsTimeScale.GetValueOnRenderThread();
 	PassParameters->View = View.ViewUniformBuffer;
 	PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 

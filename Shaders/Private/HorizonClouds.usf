@@ -22,6 +22,8 @@ SamplerState SmallNoiseTextureSampler;
 uint bHasSmallNoiseTexture;
 
 uint bDebugSolid;
+float WindSpeed;
+float TimeScale;
 
 // Builds the world-space view direction for this pixel — unit vector from the camera through the pixel.
 // Verified against OrbisClouds' own ReconstructWorldRayDirection (OrbisClouds.ush).
@@ -120,9 +122,9 @@ void MainPS(
 		return;
 	}
 
-	const int RayMaxSteps = 1500;
+	const int RayMaxSteps = 500;
 	const int ShadowMaxSteps = 8;
-	const float StepScaleDistance = 200000.0;
+	const float StepScaleDistance = 500000.0; // 200000,0
 	const float MipMapScaleDistance = 500000.0;
 	const float LightStepScale = 2.0;
 
@@ -141,12 +143,12 @@ void MainPS(
 	const float3 LightColor = float3(1.14, 1.22, 1.31) * LightColorIntensity;
 	const float3 ShadowColor = float3(0.60, 0.63, 0.7);
 
-	const float AtmosphereBlendDistance = 500000.0;
+	const float AtmosphereBlendDistance = 500000.0; // 500000.0
 	const float AtmosphereBlendIntensity = 1.0;
 	const float3 AtmosphereFogColor = float3(0.5, 0.6, 0.7);
 
 	const float3 LightDir = float3(0.492453, -0.086837, 0.865996);
-	const float3 Wind = float3(0.0, 0.0, 0.0);
+	const float3 Wind = normalize(float3(0.25, 0.0, -0.05)) * WindSpeed * TimeScale * View.GameTime;
 
 	const float3 ActorMin = -Extent;
 	const float3 ActorMax = Extent;

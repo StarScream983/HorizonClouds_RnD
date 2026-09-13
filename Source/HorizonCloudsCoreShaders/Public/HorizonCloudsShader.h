@@ -26,6 +26,8 @@ public:
 		SHADER_PARAMETER_SAMPLER(SamplerState, SmallNoiseTextureSampler)
 		SHADER_PARAMETER(uint32, bHasSmallNoiseTexture)
 		SHADER_PARAMETER(uint32, bDebugSolid)
+		SHADER_PARAMETER(float, WindSpeed)
+		SHADER_PARAMETER(float, TimeScale)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
